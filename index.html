@@ -16,6 +16,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
+        /* 強制設定高度，避免容器塌陷導致看不到字 */
         html, body, #root {
             height: 100%;
             width: 100%;
@@ -24,6 +25,7 @@
             overflow: hidden;
         }
 
+        /* 自定義動畫樣式 */
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           25% { transform: translateX(-5px); }
@@ -40,6 +42,7 @@
           animation: fade-in-up 0.4s ease-out forwards;
         }
         
+        /* 禁止選取文字，避免遊戲中誤觸 */
         body {
             user-select: none;
             -webkit-user-select: none;
@@ -91,6 +94,8 @@
         const AlertCircle = (props) => <Icon {...props}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></Icon>;
         const Zap = (props) => <Icon {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></Icon>;
         const Gift = (props) => <Icon {...props}><polyline points="20 12 20 22 4 22 4 12" /><rect x="2" y="7" width="20" height="5" /><line x1="12" y1="22" x2="12" y2="7" /><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" /><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" /></Icon>;
+        const Share2 = (props) => <Icon {...props}><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></Icon>;
+        const Copy = (props) => <Icon {...props}><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></Icon>;
 
         // --- 預設遊戲資料：分課生詞庫 ---
         const DEFAULT_LESSON_DATA = {
@@ -158,7 +163,7 @@
               { id: "4-1", chinese: "出去", pinyin: "chū qù", zhuin: "ㄔㄨ ㄑㄩˋ" },
               { id: "4-2", chinese: "蛋炒飯", pinyin: "dàn chǎo fàn", zhuin: "ㄉㄢˋ ㄔㄠˇ ㄈㄢˋ" },
               { id: "4-3", chinese: "餓", pinyin: "è", zhuin: "ㄜˋ" },
-              { id: "4-4", chinese: "漢堡", pinyin: "hàn bǎo", zhuin: "ㄏㄢˋ ㄅㄠˇ" },
+              { id: "4-4", chinese: "漢堡", pinyin: "hàn ㄅㄠˇ" },
               { id: "4-5", chinese: "快點", pinyin: "kuài diǎn", zhuin: "ㄎㄨㄞˋ ㄉㄧㄢˇ" },
               { id: "4-6", chinese: "了", pinyin: "le", zhuin: "ㄌㄜ˙" },
               { id: "4-7", chinese: "麵", pinyin: "miàn", zhuin: "ㄇㄧㄢˋ" },
@@ -351,8 +356,8 @@
         const ALL_WORDS_FALLBACK = Object.values(DEFAULT_LESSON_DATA).flatMap(lesson => lesson.words);
 
         // --- 遊戲參數 ---
-        const SPAWN_RATE = 2200; // 基礎生成間隔 (2.2秒)
-        const FALL_SPEED_BASE = 0.25; // 基礎掉落速度 (0.25)
+        const SPAWN_RATE = 2000;
+        const FALL_SPEED_BASE = 0.35;
         const GAME_WIDTH_PCT = 85;
 
         function ChineseFallingGame() {
@@ -374,6 +379,8 @@
           const [combo, setCombo] = useState(0);
           const [bottomWarn, setBottomWarn] = useState(false);
           const [prevGameState, setPrevGameState] = useState('menu');
+          const [shareUrl, setShareUrl] = useState('');
+          const [showShareToast, setShowShareToast] = useState(false);
           
           // Added: New state for reward (gift box)
           const [isRewardOpened, setIsRewardOpened] = useState(false);
@@ -400,6 +407,17 @@
             stageGoals: [],
             combo: 0
           });
+
+          // Check URL params on mount
+          useEffect(() => {
+            const params = new URLSearchParams(window.location.search);
+            const lessonParam = params.get('lesson');
+            
+            if (lessonParam && DEFAULT_LESSON_DATA[lessonParam]) {
+                setSelectedLessonId(lessonParam);
+                setGameState('singleLessonIntro');
+            }
+          }, []);
 
           const parseCustomInput = (text) => {
             const lines = text.split('\n');
@@ -965,6 +983,37 @@
             
             startGame('custom', wrongWords);
           };
+          
+          const handleCopyLink = (lessonId) => {
+             const url = new URL(window.location.href);
+             url.searchParams.set('lesson', lessonId);
+             const text = url.toString();
+             
+             // Create temporary element
+             const textArea = document.createElement("textarea");
+             textArea.value = text;
+             
+             // Ensure it's not visible but part of DOM
+             textArea.style.position = "fixed";
+             textArea.style.left = "-9999px";
+             textArea.style.top = "0";
+             document.body.appendChild(textArea);
+             
+             textArea.focus();
+             textArea.select();
+             
+             try {
+                const successful = document.execCommand('copy');
+                if(successful) {
+                    setShowShareToast(true);
+                    setTimeout(() => setShowShareToast(false), 2000);
+                }
+             } catch (err) {
+                console.error('Copy failed', err);
+             }
+             
+             document.body.removeChild(textArea);
+          };
 
           useEffect(() => {
             return () => {
@@ -980,6 +1029,13 @@
                 <div className="absolute bottom-40 right-10 text-sky-800/50 text-9xl font-serif select-none">語</div>
                 <div className="absolute top-32 right-32 w-20 h-8 bg-white/10 rounded-full blur-xl"></div>
               </div>
+              
+              {/* Toast Notification */}
+              {showShareToast && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 text-white px-4 py-2 rounded-full shadow-lg z-[100] animate-fade-in-up">
+                  已複製課程連結！
+                </div>
+              )}
 
               {gameState === 'victory' && isRewardOpened && (
                 <canvas 
@@ -1053,6 +1109,37 @@
                    </div>
                 </div>
               )}
+              
+              {/* Single Lesson Intro Screen (from URL share) */}
+              {gameState === 'singleLessonIntro' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-sky-950/80 backdrop-blur-sm p-4">
+                   <div className="bg-white text-sky-900 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center border-4 border-sky-200">
+                      <div className="w-20 h-20 bg-sky-500 rounded-full flex items-center justify-center mx-auto mb-6 text-white shadow-lg">
+                          <Target size={40} />
+                      </div>
+                      <h1 className="text-2xl font-bold mb-2 text-sky-800">專屬挑戰</h1>
+                      <p className="text-sky-600 mb-6 font-medium text-lg">
+                        {DEFAULT_LESSON_DATA[selectedLessonId]?.title || "自訂課程"}
+                      </p>
+                      
+                      <button 
+                        type="button" 
+                        onClick={() => startGame('preset', selectedLessonId, 'menu')} 
+                        className="w-full bg-sky-500 hover:bg-sky-600 text-white text-xl py-4 rounded-xl font-bold shadow-lg mb-3 flex items-center justify-center gap-2 transition-transform active:scale-95"
+                      >
+                          <Play fill="currentColor" /> 開始練習
+                      </button>
+
+                      <button 
+                        type="button" 
+                        onClick={() => setGameState('menu')} 
+                        className="w-full bg-white hover:bg-gray-100 text-sky-600 border-2 border-sky-200 text-lg py-3 rounded-xl font-bold flex items-center justify-center gap-2"
+                      >
+                          <Home size={20} /> 回主選單
+                      </button>
+                   </div>
+                </div>
+              )}
 
               {/* Custom Editor Screen */}
               {gameState === 'customEditor' && (
@@ -1104,15 +1191,26 @@
                     
                     <div className="grid grid-cols-2 gap-4 pb-8">
                       {Object.entries(DEFAULT_LESSON_DATA).map(([id, data]) => (
-                        <button 
-                          key={id}
-                          type="button"
-                          onClick={() => startGame('preset', id, 'levelSelect')}
-                          className="bg-white/10 hover:bg-white/20 border border-sky-500/30 p-4 rounded-xl text-left transition-all active:scale-95 flex flex-col gap-2"
-                        >
-                          <span className="text-xs text-sky-400 uppercase tracking-wider">Lesson {id}</span>
-                          <span className="text-lg font-bold text-white">{data.title.split('：')[1]}</span>
-                        </button>
+                        <div key={id} className="relative group">
+                            <button 
+                              type="button"
+                              onClick={() => startGame('preset', id, 'levelSelect')}
+                              className="w-full bg-white/10 hover:bg-white/20 border border-sky-500/30 p-4 rounded-xl text-left transition-all active:scale-95 flex flex-col gap-2 pr-12"
+                            >
+                              <span className="text-xs text-sky-400 uppercase tracking-wider">Lesson {id}</span>
+                              <span className="text-lg font-bold text-white truncate">{data.title.split('：')[1]}</span>
+                            </button>
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCopyLink(id);
+                                }}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-sky-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+                                title="複製課程連結"
+                            >
+                                <Share2 size={20} />
+                            </button>
+                        </div>
                       ))}
                     </div>
                   </div>
