@@ -16,7 +16,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
-        /* 強制設定高度，避免容器塌陷導致看不到字 */
         html, body, #root {
             height: 100%;
             width: 100%;
@@ -25,7 +24,6 @@
             overflow: hidden;
         }
 
-        /* 自定義動畫樣式 */
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           25% { transform: translateX(-5px); }
@@ -42,7 +40,6 @@
           animation: fade-in-up 0.4s ease-out forwards;
         }
         
-        /* 禁止選取文字，避免遊戲中誤觸 */
         body {
             user-select: none;
             -webkit-user-select: none;
@@ -93,6 +90,7 @@
         const CheckCircle = (props) => <Icon {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></Icon>;
         const AlertCircle = (props) => <Icon {...props}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></Icon>;
         const Zap = (props) => <Icon {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></Icon>;
+        const Gift = (props) => <Icon {...props}><polyline points="20 12 20 22 4 22 4 12" /><rect x="2" y="7" width="20" height="5" /><line x1="12" y1="22" x2="12" y2="7" /><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" /><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" /></Icon>;
 
         // --- 預設遊戲資料：分課生詞庫 ---
         const DEFAULT_LESSON_DATA = {
@@ -353,8 +351,8 @@
         const ALL_WORDS_FALLBACK = Object.values(DEFAULT_LESSON_DATA).flatMap(lesson => lesson.words);
 
         // --- 遊戲參數 ---
-        const SPAWN_RATE = 2000;
-        const FALL_SPEED_BASE = 0.35;
+        const SPAWN_RATE = 2200; // 基礎生成間隔 (2.2秒)
+        const FALL_SPEED_BASE = 0.25; // 基礎掉落速度 (0.25)
         const GAME_WIDTH_PCT = 85;
 
         function ChineseFallingGame() {
@@ -376,6 +374,9 @@
           const [combo, setCombo] = useState(0);
           const [bottomWarn, setBottomWarn] = useState(false);
           const [prevGameState, setPrevGameState] = useState('menu');
+          
+          // Added: New state for reward (gift box)
+          const [isRewardOpened, setIsRewardOpened] = useState(false);
 
           // UI Only States for display
           const [currentStageDisplay, setCurrentStageDisplay] = useState(0);
@@ -507,12 +508,14 @@
             
             // Adjusted range to prevent clipping on left/right edges
             // Was: Math.random() * (GAME_WIDTH_PCT - 15) + 5;
-            // New: Range from 12% to 88% to accommodate wider words centered at X
-            const randomX = Math.random() * 76 + 12; 
+            // New: Range from 15% to 85% to accommodate wider words centered at X
+            const randomX = Math.random() * 70 + 15; 
             
-            const stageMultiplier = 1 + (currentStage * 0.125);
-            const scoreBonus = score * 0.0005;
-            const finalSpeed = Math.min(1.0, (FALL_SPEED_BASE + scoreBonus) * stageMultiplier);
+            // Slower stage multiplier (was 0.125, now 0.1 to slow down progression every 3 stages)
+            const speedLevel = Math.floor(currentStage / 3);
+            const stageMultiplier = 1 + (speedLevel * 0.1); 
+            
+            const finalSpeed = Math.min(1.5, FALL_SPEED_BASE * stageMultiplier);
 
             const newWord = {
               id: Date.now() + Math.random(),
@@ -535,7 +538,9 @@
             
             const goals = stateRef.current.stageGoals;
             if (stageIndex >= goals.length - 1) {
-              playSound('victory');
+              // Changed: Do NOT play victory sound yet
+              // Reset opened state for the new victory
+              setIsRewardOpened(false); 
               setGameState('victory');
             } else {
               setGameState('stageClear');
@@ -557,8 +562,10 @@
 
             const { currentStage, score, fallingWords: currentFallingWords } = stateRef.current;
             
-            const stageRateMod = currentStage * 250; 
-            let currentRate = Math.max(1000, SPAWN_RATE - (score * 5) - stageRateMod);
+            // Slower spawn rate increase
+            const speedLevel = Math.floor(currentStage / 3);
+            const stageRateMod = speedLevel * 100; // Reduce 100ms every 3 stages
+            let currentRate = Math.max(1200, SPAWN_RATE - (score * 1) - stageRateMod); // Min 1.2s
             
             if (currentFallingWords.length === 0) {
               currentRate = 500;
@@ -638,6 +645,11 @@
             if (!targetWordId) return;
 
             const targetWord = stateRef.current.fallingWords.find(w => w.id === targetWordId);
+            
+            // Add safety check
+            if (!targetWord) {
+                return;
+            }
             
             if (targetWord && (option.wordId === targetWord.wordId || option.chinese === targetWord.chinese)) {
               // CORRECT
@@ -730,12 +742,20 @@
             // Recalculate goals logic (same as startGame)
             const totalWords = currentLessonWords.length;
             let goals = [];
-            if (totalWords < 8) {
-                goals = [totalWords];
-            } else if (totalWords < 15) {
-                goals = [Math.ceil(totalWords * 0.4), totalWords];
+            if (totalWords > 30) {
+                const chunkSize = 15;
+                for (let count = chunkSize; count < totalWords; count += chunkSize) {
+                    goals.push(count);
+                }
+                goals.push(totalWords);
             } else {
-                goals = [Math.ceil(totalWords * 0.3), Math.ceil(totalWords * 0.65), totalWords];
+                if (totalWords < 8) {
+                    goals = [totalWords];
+                } else if (totalWords < 15) {
+                    goals = [Math.ceil(totalWords * 0.4), totalWords];
+                } else {
+                    goals = [Math.ceil(totalWords * 0.3), Math.ceil(totalWords * 0.65), totalWords];
+                }
             }
 
             setScore(0);
@@ -766,9 +786,9 @@
             startCountdown();
           };
 
-          // Confetti Loop
+          // Confetti Loop - Modified to check isRewardOpened
           useEffect(() => {
-            if (gameState !== 'victory') return;
+            if (gameState !== 'victory' || !isRewardOpened) return;
             
             const canvas = document.getElementById('confetti-canvas');
             if (!canvas) return;
@@ -820,7 +840,7 @@
 
             animate();
 
-          }, [gameState]);
+          }, [gameState, isRewardOpened]);
 
           const nextStage = () => {
             const nextStageIdx = stateRef.current.currentStage + 1;
@@ -843,6 +863,12 @@
             window.addEventListener('keydown', handleKeyDown);
             return () => window.removeEventListener('keydown', handleKeyDown);
           }, [handleKeyDown]);
+
+          // New function to handle opening the reward
+          const handleOpenReward = () => {
+            setIsRewardOpened(true);
+            playSound('victory');
+          };
 
           const startGame = (type, idOrData, fromState = undefined) => {
             if (requestRef.current) {
@@ -883,12 +909,23 @@
 
             const totalWords = wordsPool.length;
             let goals = [];
-            if (totalWords < 8) {
-                goals = [totalWords];
-            } else if (totalWords < 15) {
-                goals = [Math.ceil(totalWords * 0.4), totalWords];
+            
+            // Logic for large datasets (e.g. ALL words review)
+            if (totalWords > 30) {
+                const chunkSize = 15; // Every 15 words is a stage
+                for (let count = chunkSize; count < totalWords; count += chunkSize) {
+                    goals.push(count);
+                }
+                goals.push(totalWords); // Add the final total
             } else {
-                goals = [Math.ceil(totalWords * 0.3), Math.ceil(totalWords * 0.65), totalWords];
+                // Logic for single lessons
+                if (totalWords < 8) {
+                    goals = [totalWords];
+                } else if (totalWords < 15) {
+                    goals = [Math.ceil(totalWords * 0.4), totalWords];
+                } else {
+                    goals = [Math.ceil(totalWords * 0.3), Math.ceil(totalWords * 0.65), totalWords];
+                }
             }
 
             setScore(0);
@@ -944,12 +981,12 @@
                 <div className="absolute top-32 right-32 w-20 h-8 bg-white/10 rounded-full blur-xl"></div>
               </div>
 
-              {gameState === 'victory' && (
+              {gameState === 'victory' && isRewardOpened && (
                 <canvas 
                     id="confetti-canvas"
                     width={window.innerWidth} 
                     height={window.innerHeight} 
-                    className="absolute inset-0 z-40 pointer-events-none"
+                    className="absolute inset-0 z-[60] pointer-events-none"
                 />
               )}
 
@@ -1232,7 +1269,22 @@
                       <h2 className="text-3xl font-bold mb-2 text-sky-800">關卡 {currentStageDisplay + 1} 完成！</h2>
                       <p className="text-sky-600 mb-6">
                          已精熟 {masteredCountDisplay} 個單字。<br/>
-                         <span className="text-amber-600 font-bold mt-2 block">下一關速度將會變快！</span>
+                         
+                         {/* Motivational Messages based on stage */}
+                         {(currentStageDisplay + 1) % 3 === 0 ? (
+                            <span className="text-amber-600 font-bold mt-2 block text-lg animate-pulse">
+                                {currentStageDisplay + 1 === 3 && "太棒了！已經通過三關了！"}
+                                {currentStageDisplay + 1 === 6 && "不可思議！你的專注力真強！"}
+                                {currentStageDisplay + 1 === 9 && "堅持住！勝利就在眼前！"}
+                                {currentStageDisplay + 1 > 9 && "你是華語特訓大師！"}
+                            </span>
+                         ) : (
+                            <span className="text-slate-400 font-bold mt-2 block">
+                                {(currentStageDisplay + 1) % 3 === 2 
+                                    ? "下一關速度將會稍微提升！" 
+                                    : "保持節奏，繼續前進！"}
+                            </span>
+                         )}
                       </p>
                       
                       <button type="button" onClick={nextStage} className="w-full bg-green-500 hover:bg-green-600 text-white text-lg py-3 rounded-xl font-bold shadow-md flex items-center justify-center gap-2">
@@ -1246,80 +1298,99 @@
               {(gameState === 'gameover' || gameState === 'victory') && (
                 <div className="absolute inset-0 flex items-center justify-center z-50 bg-sky-950/90 backdrop-blur-sm p-4 overflow-y-auto">
                      <div className="bg-white text-sky-900 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center border-4 border-sky-200 animate-fade-in-up my-auto">
-                        {gameState === 'victory' ? (
+                        {gameState === 'victory' && !isRewardOpened ? (
+                            // 禮物盒狀態
                            <>
-                              <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Trophy size={40} className="text-yellow-500" />
+                              <div 
+                                onClick={handleOpenReward}
+                                className="w-32 h-32 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-6 cursor-pointer hover:scale-110 transition-transform animate-bounce shadow-lg border-4 border-red-200"
+                              >
+                                <Gift size={64} className="text-red-500" />
                               </div>
-                              <h2 className="text-2xl font-bold mb-1 text-sky-800">全部通關！</h2>
-                              <p className="text-sky-600 mb-4 text-sm">太棒了！學會了 {stateRef.current.currentLessonWords.length} 個生詞。</p>
+                              <h2 className="text-2xl font-bold mb-2 text-sky-800 animate-pulse">恭喜通關！</h2>
+                              <p className="text-sky-600 mb-6 text-lg font-bold">點擊禮物盒領取獎勵！</p>
                            </>
                         ) : (
+                           // 已拆開或是失敗狀態
                            <>
-                              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Heart size={40} className="text-gray-400" />
-                              </div>
-                              <h2 className="text-2xl font-bold mb-1 text-sky-800">再接再厲</h2>
-                              <p className="text-sky-600 mb-4 text-sm">加油，多練習幾次！</p>
-                           </>
-                        )}
-                        
-                        {stateRef.current.wrongWordIds.size > 0 ? (
-                          <div className="mb-4 bg-red-50 rounded-xl p-4 border border-red-100">
-                            <div className="flex items-center gap-2 mb-3 text-red-600 font-bold border-b border-red-200 pb-2">
-                              <AlertCircle size={18} />
-                              錯題回顧 ({stateRef.current.wrongWordIds.size})
-                            </div>
-                            <div className="max-h-40 overflow-y-auto pr-1 space-y-2 text-left">
-                              {stateRef.current.currentLessonWords
-                                .filter(w => stateRef.current.wrongWordIds.has(w.id))
-                                .map(word => (
-                                  <div key={word.id} 
-                                       onClick={() => speak(word.chinese)}
-                                       className="flex items-center justify-between bg-white p-2 rounded-lg shadow-sm cursor-pointer hover:bg-red-50 transition-colors"
-                                  >
-                                    <span className="font-bold text-lg text-slate-700">{word.chinese}</span>
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500 font-mono">{word.pinyin}</div>
-                                      <div className="text-xs text-slate-400 font-mono">{word.zhuin}</div>
+                                {gameState === 'victory' ? (
+                                   <>
+                                      <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+                                        <Trophy size={40} className="text-yellow-500" />
+                                      </div>
+                                      <h2 className="text-2xl font-bold mb-1 text-sky-800">
+                                        {stateRef.current.wrongWordIds.size === 0 ? "完美通關！" : "挑戰成功！"}
+                                      </h2>
+                                      <p className="text-sky-600 mb-4 text-sm">太棒了！學會了 {stateRef.current.currentLessonWords.length} 個生詞。</p>
+                                   </>
+                                ) : (
+                                   <>
+                                      <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <Heart size={40} className="text-gray-400" />
+                                      </div>
+                                      <h2 className="text-2xl font-bold mb-1 text-sky-800">再接再厲</h2>
+                                      <p className="text-sky-600 mb-4 text-sm">加油，多練習幾次！</p>
+                                   </>
+                                )}
+                                
+                                {stateRef.current.wrongWordIds.size > 0 ? (
+                                  <div className="mb-4 bg-red-50 rounded-xl p-4 border border-red-100">
+                                    <div className="flex items-center gap-2 mb-3 text-red-600 font-bold border-b border-red-200 pb-2">
+                                      <AlertCircle size={18} />
+                                      錯題回顧 ({stateRef.current.wrongWordIds.size})
                                     </div>
-                                    <Volume2 size={14} className="text-slate-300 ml-2" />
+                                    <div className="max-h-40 overflow-y-auto pr-1 space-y-2 text-left">
+                                      {stateRef.current.currentLessonWords
+                                        .filter(w => stateRef.current.wrongWordIds.has(w.id))
+                                        .map(word => (
+                                          <div key={word.id} 
+                                               onClick={() => speak(word.chinese)}
+                                               className="flex items-center justify-between bg-white p-2 rounded-lg shadow-sm cursor-pointer hover:bg-red-50 transition-colors"
+                                          >
+                                            <span className="font-bold text-lg text-slate-700">{word.chinese}</span>
+                                            <div className="text-right">
+                                              <div className="text-xs text-slate-500 font-mono">{word.pinyin}</div>
+                                              <div className="text-xs text-slate-400 font-mono">{word.zhuin}</div>
+                                            </div>
+                                            <Volume2 size={14} className="text-slate-300 ml-2" />
+                                          </div>
+                                        ))
+                                      }
+                                    </div>
+                                    <button 
+                                      type="button"
+                                      onClick={retryMistakes}
+                                      className="w-full mt-3 bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg font-bold shadow-sm flex items-center justify-center gap-2 text-sm"
+                                    >
+                                      <Zap size={16} fill="currentColor" /> 只練習錯題
+                                    </button>
                                   </div>
-                                ))
-                              }
-                            </div>
-                            <button 
-                              type="button"
-                              onClick={retryMistakes}
-                              className="w-full mt-3 bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg font-bold shadow-sm flex items-center justify-center gap-2 text-sm"
-                            >
-                              <Zap size={16} fill="currentColor" /> 只練習錯題
-                            </button>
-                          </div>
-                        ) : (
-                          gameState === 'victory' && (
-                            <div className="mb-6 bg-green-50 rounded-xl p-4 border border-green-100 text-green-700">
-                              <p className="font-bold flex items-center justify-center gap-2">
-                                <Star className="fill-green-500 text-green-500" />
-                                太神了！完美無瑕！
-                              </p>
-                            </div>
-                          )
-                        )}
+                                ) : (
+                                  gameState === 'victory' && (
+                                    <div className="mb-6 bg-green-50 rounded-xl p-4 border border-green-100 text-green-700">
+                                      <p className="font-bold flex items-center justify-center gap-2">
+                                        <Star className="fill-green-500 text-green-500" />
+                                        太神了！完美無瑕！
+                                      </p>
+                                    </div>
+                                  )
+                                )}
 
-                        <div className="flex flex-col gap-2">
-                          <button 
-                            type="button"
-                            onClick={() => startGame(selectedLessonId === 'custom' ? 'custom' : 'preset', selectedLessonId === 'custom' ? customData : selectedLessonId)} 
-                            className="w-full bg-sky-500 hover:bg-sky-600 text-white text-lg py-3 rounded-xl font-bold shadow-md flex items-center justify-center gap-2"
-                          >
-                              <RotateCcw size={18} /> 再次挑戰
-                          </button>
-                          <button type="button" onClick={() => setGameState(prevGameState)} className="w-full bg-white hover:bg-sky-50 border-2 border-sky-200 text-sky-700 text-lg py-3 rounded-xl font-bold flex items-center justify-center gap-2">
-                              {prevGameState === 'menu' ? <Home size={18} /> : <ArrowLeft size={18} />}
-                              {prevGameState === 'menu' ? '回主選單' : '返回上一頁'}
-                          </button>
-                        </div>
+                                <div className="flex flex-col gap-2">
+                                  <button 
+                                    type="button"
+                                    onClick={() => startGame(selectedLessonId === 'custom' ? 'custom' : 'preset', selectedLessonId === 'custom' ? customData : selectedLessonId)} 
+                                    className="w-full bg-sky-500 hover:bg-sky-600 text-white text-lg py-3 rounded-xl font-bold shadow-md flex items-center justify-center gap-2"
+                                  >
+                                      <RotateCcw size={18} /> 再次挑戰
+                                  </button>
+                                  <button type="button" onClick={() => setGameState(prevGameState)} className="w-full bg-white hover:bg-sky-50 border-2 border-sky-200 text-sky-700 text-lg py-3 rounded-xl font-bold flex items-center justify-center gap-2">
+                                      {prevGameState === 'menu' ? <Home size={18} /> : <ArrowLeft size={18} />}
+                                      {prevGameState === 'menu' ? '回主選單' : '返回上一頁'}
+                                  </button>
+                                </div>
+                           </>
+                        )}
                      </div>
                 </div>
               )}
