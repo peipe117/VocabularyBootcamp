@@ -96,6 +96,7 @@
         const Gift = (props) => <Icon {...props}><polyline points="20 12 20 22 4 22 4 12" /><rect x="2" y="7" width="20" height="5" /><line x1="12" y1="22" x2="12" y2="7" /><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" /><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" /></Icon>;
         const Share2 = (props) => <Icon {...props}><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></Icon>;
         const Copy = (props) => <Icon {...props}><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></Icon>;
+        const User = (props) => <Icon {...props}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>;
 
         // --- 預設遊戲資料：分課生詞庫 ---
         const DEFAULT_LESSON_DATA = {
@@ -163,7 +164,7 @@
               { id: "4-1", chinese: "出去", pinyin: "chū qù", zhuin: "ㄔㄨ ㄑㄩˋ" },
               { id: "4-2", chinese: "蛋炒飯", pinyin: "dàn chǎo fàn", zhuin: "ㄉㄢˋ ㄔㄠˇ ㄈㄢˋ" },
               { id: "4-3", chinese: "餓", pinyin: "è", zhuin: "ㄜˋ" },
-              { id: "4-4", chinese: "漢堡", pinyin: "hàn ㄅㄠˇ" },
+              { id: "4-4", chinese: "漢堡", pinyin: "hàn bǎo", zhuin: "ㄏㄢˋ ㄅㄠˇ" },
               { id: "4-5", chinese: "快點", pinyin: "kuài diǎn", zhuin: "ㄎㄨㄞˋ ㄉㄧㄢˇ" },
               { id: "4-6", chinese: "了", pinyin: "le", zhuin: "ㄌㄜ˙" },
               { id: "4-7", chinese: "麵", pinyin: "miàn", zhuin: "ㄇㄧㄢˋ" },
@@ -384,6 +385,9 @@
           
           // Added: New state for reward (gift box)
           const [isRewardOpened, setIsRewardOpened] = useState(false);
+
+          // Added: New state for player name
+          const [playerName, setPlayerName] = useState("");
 
           // UI Only States for display
           const [currentStageDisplay, setCurrentStageDisplay] = useState(0);
@@ -893,7 +897,6 @@
               cancelAnimationFrame(requestRef.current);
             }
 
-            // Update prevGameState if fromState is provided (not retry)
             if (fromState) {
                 setPrevGameState(fromState);
             }
@@ -927,16 +930,13 @@
 
             const totalWords = wordsPool.length;
             let goals = [];
-            
-            // Logic for large datasets (e.g. ALL words review)
             if (totalWords > 30) {
-                const chunkSize = 15; // Every 15 words is a stage
+                const chunkSize = 15;
                 for (let count = chunkSize; count < totalWords; count += chunkSize) {
                     goals.push(count);
                 }
-                goals.push(totalWords); // Add the final total
+                goals.push(totalWords);
             } else {
-                // Logic for single lessons
                 if (totalWords < 8) {
                     goals = [totalWords];
                 } else if (totalWords < 15) {
@@ -977,10 +977,7 @@
           const retryMistakes = () => {
             const wrongWords = stateRef.current.currentLessonWords.filter(w => stateRef.current.wrongWordIds.has(w.id));
             if (wrongWords.length === 0) return;
-            
-            // FIX: Update customData state so that "Play Again" can access it later if needed
             setCustomData(wrongWords);
-            
             startGame('custom', wrongWords);
           };
           
@@ -1091,6 +1088,20 @@
                       <h1 className="text-3xl font-bold mb-2 text-sky-800">生詞特訓班</h1>
                       <p className="text-sky-600 mb-6 font-medium">學華語向前走 第二冊</p>
                       
+                      <div className="mb-4 w-full px-4">
+                        <label className="block text-sky-300 text-sm font-bold mb-1 text-left flex items-center gap-1">
+                            <Icon size={14}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>
+                            學生姓名
+                        </label>
+                        <input
+                            type="text"
+                            value={playerName}
+                            onChange={(e) => setPlayerName(e.target.value)}
+                            placeholder="請輸入名字..."
+                            className="w-full p-3 rounded-xl border-2 border-sky-200 text-sky-800 focus:outline-none focus:border-sky-500 transition-colors text-center font-bold placeholder:font-normal placeholder:text-gray-400"
+                        />
+                      </div>
+
                       <button type="button" onClick={() => setGameState('levelSelect')} className="w-full bg-sky-500 hover:bg-sky-600 text-white text-xl py-4 rounded-xl font-bold shadow-lg mb-3 flex items-center justify-center gap-2 transition-transform active:scale-95">
                           <Play fill="currentColor" /> 開始闖關
                       </button>
@@ -1121,6 +1132,20 @@
                       <p className="text-sky-600 mb-6 font-medium text-lg">
                         {DEFAULT_LESSON_DATA[selectedLessonId]?.title || "自訂課程"}
                       </p>
+
+                      <div className="mb-4 w-full px-4">
+                        <label className="block text-sky-600 text-sm font-bold mb-1 text-left flex items-center gap-1">
+                            <Icon size={14}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>
+                            學生姓名
+                        </label>
+                        <input
+                            type="text"
+                            value={playerName}
+                            onChange={(e) => setPlayerName(e.target.value)}
+                            placeholder="請輸入名字..."
+                            className="w-full p-3 rounded-xl border-2 border-sky-200 text-sky-800 focus:outline-none focus:border-sky-500 transition-colors text-center font-bold placeholder:font-normal placeholder:text-gray-400"
+                        />
+                      </div>
                       
                       <button 
                         type="button" 
@@ -1405,7 +1430,9 @@
                               >
                                 <Gift size={64} className="text-red-500" />
                               </div>
-                              <h2 className="text-2xl font-bold mb-2 text-sky-800 animate-pulse">恭喜通關！</h2>
+                              <h2 className="text-2xl font-bold mb-2 text-sky-800 animate-pulse">
+                                {playerName ? `${playerName} ` : ""}恭喜通關！
+                              </h2>
                               <p className="text-sky-600 mb-6 text-lg font-bold">點擊禮物盒領取獎勵！</p>
                            </>
                         ) : (
@@ -1417,6 +1444,7 @@
                                         <Trophy size={40} className="text-yellow-500" />
                                       </div>
                                       <h2 className="text-2xl font-bold mb-1 text-sky-800">
+                                        {playerName ? `${playerName} ` : ""}
                                         {stateRef.current.wrongWordIds.size === 0 ? "完美通關！" : "挑戰成功！"}
                                       </h2>
                                       <p className="text-sky-600 mb-4 text-sm">太棒了！學會了 {stateRef.current.currentLessonWords.length} 個生詞。</p>
