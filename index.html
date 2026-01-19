@@ -193,7 +193,7 @@
               { id: "5-9", chinese: "花", pinyin: "huā", zhuin: "ㄏㄨㄚ" },
               { id: "5-10", chinese: "了", pinyin: "le", zhuin: "ㄌㄜ˙" },
               { id: "5-11", chinese: "綠色", pinyin: "lǜ sè", zhuin: "ㄌㄩˋ ㄙㄜˋ" },
-              { id: "5-12", chinese: "漂亮", pinyin: "piào liàng", zhuin: "ㄆㄧㄠˋ ㄌㄧㄤˋ" },
+              { id: "5-12", chinese: "漂亮", pinyin: "piào ㄌㄧㄤˋ" },
               { id: "5-13", chinese: "秋天", pinyin: "qiū tiān", zhuin: "ㄑㄧㄡ ㄊㄧㄢ" },
               { id: "5-14", chinese: "時候", pinyin: "shí hòu", zhuin: "ㄕˊ ㄏㄡˋ" },
               { id: "5-15", chinese: "樹葉", pinyin: "shù yè", zhuin: "ㄕㄨˋ ㄧㄝˋ" },
@@ -444,8 +444,30 @@
             if ('speechSynthesis' in window) {
               window.speechSynthesis.cancel();
               const utterance = new SpeechSynthesisUtterance(text);
+              
+              // 1. 強制設定語言代碼
               utterance.lang = 'zh-TW';
-              utterance.rate = 0.9;
+              utterance.rate = 0.8; // 稍微放慢一點，適合教學
+
+              // 2. 強制尋找並指定中文語音包 (解決系統預設為日文的問題)
+              const voices = window.speechSynthesis.getVoices();
+              
+              // 優先找台灣繁體中文 (zh-TW)
+              let targetVoice = voices.find(v => 
+                  v.lang.replace('_', '-').toLowerCase() === 'zh-tw' || 
+                  v.name.includes('Taiwan')
+              );
+
+              // 找不到則找任意中文 (zh)
+              if (!targetVoice) {
+                  targetVoice = voices.find(v => v.lang.toLowerCase().startsWith('zh'));
+              }
+
+              // 如果有找到中文語音包，就強制指定
+              if (targetVoice) {
+                  utterance.voice = targetVoice;
+              }
+
               window.speechSynthesis.speak(utterance);
             }
           };
@@ -897,6 +919,7 @@
               cancelAnimationFrame(requestRef.current);
             }
 
+            // Update prevGameState if fromState is provided (not retry)
             if (fromState) {
                 setPrevGameState(fromState);
             }
@@ -930,13 +953,16 @@
 
             const totalWords = wordsPool.length;
             let goals = [];
+            
+            // Logic for large datasets (e.g. ALL words review)
             if (totalWords > 30) {
-                const chunkSize = 15;
+                const chunkSize = 15; // Every 15 words is a stage
                 for (let count = chunkSize; count < totalWords; count += chunkSize) {
                     goals.push(count);
                 }
-                goals.push(totalWords);
+                goals.push(totalWords); // Add the final total
             } else {
+                // Logic for single lessons
                 if (totalWords < 8) {
                     goals = [totalWords];
                 } else if (totalWords < 15) {
@@ -977,7 +1003,10 @@
           const retryMistakes = () => {
             const wrongWords = stateRef.current.currentLessonWords.filter(w => stateRef.current.wrongWordIds.has(w.id));
             if (wrongWords.length === 0) return;
+            
+            // FIX: Update customData state so that "Play Again" can access it later if needed
             setCustomData(wrongWords);
+            
             startGame('custom', wrongWords);
           };
           
