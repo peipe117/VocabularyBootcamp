@@ -164,7 +164,7 @@
               { id: "4-1", chinese: "出去", pinyin: "chū qù", zhuin: "ㄔㄨ ㄑㄩˋ" },
               { id: "4-2", chinese: "蛋炒飯", pinyin: "dàn chǎo fàn", zhuin: "ㄉㄢˋ ㄔㄠˇ ㄈㄢˋ" },
               { id: "4-3", chinese: "餓", pinyin: "è", zhuin: "ㄜˋ" },
-              { id: "4-4", chinese: "漢堡", pinyin: "hàn bǎo", zhuin: "ㄏㄢˋ ㄅㄠˇ" },
+              { id: "4-4", chinese: "漢堡", pinyin: "hàn ㄅㄠˇ" },
               { id: "4-5", chinese: "快點", pinyin: "kuài diǎn", zhuin: "ㄎㄨㄞˋ ㄉㄧㄢˇ" },
               { id: "4-6", chinese: "了", pinyin: "le", zhuin: "ㄌㄜ˙" },
               { id: "4-7", chinese: "麵", pinyin: "miàn", zhuin: "ㄇㄧㄢˋ" },
@@ -1447,6 +1447,13 @@
                                         {playerName ? `${playerName} ` : ""}
                                         {stateRef.current.wrongWordIds.size === 0 ? "完美通關！" : "挑戰成功！"}
                                       </h2>
+                                      
+                                      <p className="text-lg text-sky-700 font-bold mb-2">
+                                        {selectedLessonId && selectedLessonId !== 'all' && selectedLessonId !== 'custom' ? 
+                                            `Lesson ${selectedLessonId}: ${stateRef.current.title}` : 
+                                            stateRef.current.title}
+                                      </p>
+                                      
                                       <p className="text-sky-600 mb-4 text-sm">太棒了！學會了 {stateRef.current.currentLessonWords.length} 個生詞。</p>
                                    </>
                                 ) : (
