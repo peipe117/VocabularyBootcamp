@@ -1416,6 +1416,38 @@
                             className="w-full p-3 rounded-xl border-2 border-sky-200 text-sky-800 focus:outline-none focus:border-sky-500 transition-colors text-center font-bold placeholder:font-normal placeholder:text-gray-400"
                         />
                       </div>
+
+                      {/* 新增：難度選擇區塊 (For Single Lesson) */}
+                      <div className="bg-sky-50/50 p-3 rounded-xl mb-4 w-full border border-sky-100">
+                          <h3 className="text-sky-400 text-xs font-bold mb-2 flex items-center justify-center gap-1">
+                              <Target size={14} />
+                              選擇挑戰速度
+                          </h3>
+                          <div className="grid grid-cols-3 gap-2">
+                              {Object.values(DIFFICULTY_SETTINGS).map((setting) => (
+                                  <button
+                                      key={setting.id}
+                                      onClick={() => { setCurrentDifficulty(setting.id); initAudio(); }}
+                                      className={`
+                                          relative p-1.5 rounded-lg border transition-all flex flex-col items-center justify-center h-16
+                                          ${currentDifficulty === setting.id 
+                                              ? `${setting.bg} border-transparent text-white shadow-md scale-105 z-10` 
+                                              : 'bg-white border-sky-200 text-sky-400 hover:bg-sky-50'
+                                          }
+                                      `}
+                                  >
+                                      <span className="text-sm font-bold leading-tight">{setting.label.split(' ')[0]}</span>
+                                      <span className="text-[10px] font-bold whitespace-nowrap">{setting.label.split(' ')[1]}</span>
+                                      
+                                      {currentDifficulty === setting.id && (
+                                          <div className="absolute -top-1.5 -right-1.5 bg-white text-sky-900 rounded-full p-0.5 shadow-sm border border-sky-100">
+                                              <CheckCircle size={10} />
+                                          </div>
+                                      )}
+                                  </button>
+                              ))}
+                          </div>
+                      </div>
                       
                       <button 
                         type="button" 
