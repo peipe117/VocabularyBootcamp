@@ -508,7 +508,7 @@
             },
             fast: { 
                 id: 'fast', 
-                label: '🐆 快快的', 
+                label: '🚀 快快的', // 修改：將🐆改成🚀，與遊戲內角色統一
                 subLabel: '超級挑戰', 
                 bg: 'bg-red-500', 
                 speedBase: 0.4,    // 大幅調慢 (原 0.6)
@@ -521,6 +521,39 @@
         };
 
         const GAME_WIDTH_PCT = 85;
+
+        // Helper: 計算不重疊的位置
+        const getSafePosition = (existingWords) => {
+            const maxRetries = 30; // 嘗試 30 次尋找空位
+            const minDistanceSq = 18 * 18; // 最小安全距離的平方 (18% 的寬度)
+
+            for (let i = 0; i < maxRetries; i++) {
+                // 嘗試生成隨機位置 (範圍稍微內縮，避免貼邊)
+                const x = Math.random() * 70 + 15; // 15% - 85%
+                const y = Math.random() * 50 + 15; // 15% - 65% (避開底部按鈕區)
+
+                let collision = false;
+                for (const word of existingWords) {
+                    const dx = word.x - x;
+                    const dy = word.y - y;
+                    // 簡單的距離檢查 (忽略長寬比差異，做粗略估計)
+                    if (dx * dx + dy * dy < minDistanceSq) {
+                        collision = true;
+                        break;
+                    }
+                }
+
+                if (!collision) {
+                    return { x, y };
+                }
+            }
+            
+            // 如果真的找不到位置 (極少發生)，還是回傳一個隨機位置
+            return {
+                x: Math.random() * 70 + 15,
+                y: Math.random() * 50 + 15
+            };
+        };
 
         function ChineseFallingGame() {
           const [gameState, setGameState] = useState('menu');
@@ -850,16 +883,23 @@
               setHitEffect({ x: targetWord.x, y: targetWord.y });
               setTimeout(() => setHitEffect(null), 500);
 
-              // Add word to background wall (limit to last 20)
-              const newBgWord = {
-                  id: targetWord.id + '-bg', // Unique ID
-                  text: targetWord.chinese,
-                  x: Math.random() * 80 + 10, // 10% to 90%
-                  y: Math.random() * 60 + 10, // 10% to 70% (keep it somewhat upper/mid)
-                  rotation: Math.random() * 60 - 30, // -30 to 30 deg
-                  fontSize: Math.random() * 2 + 2 + 'rem' // Random size
-              };
-              setBgWords(prev => [...prev, newBgWord].slice(-20)); // Limit to last 20
+              // Add word to background wall (With anti-overlap logic)
+              setBgWords(prev => {
+                  // 取得計算後的安全位置
+                  const pos = getSafePosition(prev);
+                  
+                  const newBgWord = {
+                      id: targetWord.id + '-bg', 
+                      text: targetWord.chinese,
+                      x: pos.x,
+                      y: pos.y,
+                      rotation: Math.random() * 40 - 20, // 角度稍微收斂一點 (-20 ~ 20)
+                      fontSize: Math.random() * 1.5 + 2.5 + 'rem' // 稍微大一點
+                  };
+                  
+                  // 限制數量為 12 個，避免畫面太滿導致無法找到空位
+                  return [...prev, newBgWord].slice(-12); 
+              });
 
               const nextWords = stateRef.current.fallingWords.filter(w => w.id !== targetWordId);
               stateRef.current.fallingWords = nextWords;
