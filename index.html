@@ -41,7 +41,25 @@
         .animate-fade-in-up {
           animation: fade-in-up 0.4s ease-out forwards;
         }
+        /* 新增：背景字浮現動畫 - 修正版：加入 CSS 變數支援旋轉 */
+        @keyframes pop-in {
+          0% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--rot)) scale(0.5); }
+          50% { transform: translate(-50%, -50%) rotate(var(--rot)) scale(1.2); }
+          100% { opacity: 0.2; transform: translate(-50%, -50%) rotate(var(--rot)) scale(1); }
+        }
+        .animate-pop-in {
+            animation: pop-in 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
         
+        /* 新增：受傷紅屏閃爍 */
+        @keyframes damage-flash {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 1; }
+        }
+        .animate-damage {
+            animation: damage-flash 0.3s ease-in-out;
+        }
+
         /* 禁止選取文字，避免遊戲中誤觸 */
         body {
             user-select: none;
@@ -55,6 +73,75 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback } = React;
+
+        // --- 音效管理單例 (優化效能) ---
+        const audioCtxRef = { current: null };
+        const initAudio = () => {
+            if (!audioCtxRef.current) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (AudioContext) {
+                    audioCtxRef.current = new AudioContext();
+                }
+            }
+            // 嘗試解鎖 iOS/Chrome 的音頻上下文
+            if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+                audioCtxRef.current.resume();
+            }
+        };
+
+        const playSound = (type) => {
+            if (!audioCtxRef.current) initAudio();
+            const ctx = audioCtxRef.current;
+            if (!ctx) return;
+
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            const now = ctx.currentTime;
+
+            if (type === 'error') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(100, now + 0.1);
+                gain.gain.setValueAtTime(0.5, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            } else if (type === 'correct') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            } else if (type === 'heal') { // 新增：補血音效
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.linearRampToValueAtTime(600, now + 0.1);
+                osc.frequency.linearRampToValueAtTime(800, now + 0.2);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                osc.start(now);
+                osc.stop(now + 0.4);
+            } else if (type === 'victory') {
+                [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                    const vOsc = ctx.createOscillator();
+                    const vGain = ctx.createGain();
+                    vOsc.type = 'triangle';
+                    vOsc.frequency.setValueAtTime(freq, now + i * 0.15);
+                    vGain.gain.setValueAtTime(0.2, now + i * 0.15);
+                    vGain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.8);
+                    vOsc.connect(vGain);
+                    vGain.connect(ctx.destination);
+                    vOsc.start(now + i * 0.15);
+                    vOsc.stop(now + i * 0.15 + 0.8);
+                });
+            }
+        };
 
         // --- 內建圖標組件 ---
         const Icon = ({ children, size = 24, className = "", ...props }) => (
@@ -98,6 +185,43 @@
         const Copy = (props) => <Icon {...props}><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></Icon>;
         const User = (props) => <Icon {...props}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>;
 
+        // --- 新增組件：劇情進度條 ---
+        const StoryProgressBar = ({ current, total, character, startIcon, endIcon }) => {
+            const percentage = Math.min(100, Math.max(0, (current / total) * 100));
+            
+            return (
+                <div className="w-48 md:w-64 h-10 relative mt-2 select-none" title={`進度: ${current}/${total}`}>
+                    <div className="absolute top-1/2 left-0 right-0 h-3 bg-sky-800/60 rounded-full -translate-y-1/2 border border-sky-600/30 overflow-hidden">
+                        <div 
+                            className="h-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all duration-500 ease-out"
+                            style={{ width: `${percentage}%` }}
+                        ></div>
+                    </div>
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/4 z-0 opacity-80">
+                        <div className="text-lg">{startIcon}</div>
+                    </div>
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/4 z-10 animate-pulse">
+                        <div className="text-xl drop-shadow-md">{endIcon}</div>
+                    </div>
+                    <div 
+                        className="absolute top-1/2 -translate-y-1/2 z-20 transition-all duration-500 ease-out"
+                        style={{ left: `${percentage}%`, transform: `translate(-50%, -50%)` }}
+                    >
+                        <div className="relative">
+                            <div className="text-3xl filter drop-shadow-lg transform -scale-x-100">{character}</div>
+                            <div className="absolute top-3/4 right-full -translate-y-1/2 flex gap-0.5">
+                                <div className="w-1.5 h-1.5 bg-white/50 rounded-full animate-ping opacity-75"></div>
+                                <div className="w-1 h-1 bg-white/30 rounded-full animate-ping delay-75 opacity-75"></div>
+                            </div>
+                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap backdrop-blur-sm border border-white/20">
+                                {current}/{total}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         // --- 預設遊戲資料：分課生詞庫 ---
         const DEFAULT_LESSON_DATA = {
           1: {
@@ -117,7 +241,7 @@
               { id: "1-12", chinese: "現在", pinyin: "xiàn zài", zhuin: "ㄒㄧㄢˋ ㄗㄞˋ" },
               { id: "1-13", chinese: "新", pinyin: "xīn", zhuin: "ㄒㄧㄣ" },
               { id: "1-14", chinese: "學", pinyin: "xué", zhuin: "ㄒㄩㄝˊ" },
-              { id: "1-15", chinese: "游泳", pinyin: "yóu yǒng", zhuin: "ㄧㄡˊ ㄩㄥˇ" },
+              { id: "1-15", chinese: "游泳", pinyin: "ㄧㄡˊ ㄩㄥˇ" },
               { id: "1-16", chinese: "最", pinyin: "zuì", zhuin: "ㄗㄨㄟˋ" },
               { id: "1-17", chinese: "華語", pinyin: "huá yǔ", zhuin: "ㄏㄨㄚˊ ㄩˇ" },
               { id: "1-18", chinese: "張莉", pinyin: "Zhāng Lì", zhuin: "ㄓㄤ ㄌㄧˋ" },
@@ -164,7 +288,7 @@
               { id: "4-1", chinese: "出去", pinyin: "chū qù", zhuin: "ㄔㄨ ㄑㄩˋ" },
               { id: "4-2", chinese: "蛋炒飯", pinyin: "dàn chǎo fàn", zhuin: "ㄉㄢˋ ㄔㄠˇ ㄈㄢˋ" },
               { id: "4-3", chinese: "餓", pinyin: "è", zhuin: "ㄜˋ" },
-              { id: "4-4", chinese: "漢堡", pinyin: "hàn ㄅㄠˇ" },
+              { id: "4-4", chinese: "漢堡", pinyin: "hàn bǎo", zhuin: "ㄏㄢˋ ㄅㄠˇ" },
               { id: "4-5", chinese: "快點", pinyin: "kuài diǎn", zhuin: "ㄎㄨㄞˋ ㄉㄧㄢˇ" },
               { id: "4-6", chinese: "了", pinyin: "le", zhuin: "ㄌㄜ˙" },
               { id: "4-7", chinese: "麵", pinyin: "miàn", zhuin: "ㄇㄧㄢˋ" },
@@ -193,7 +317,7 @@
               { id: "5-9", chinese: "花", pinyin: "huā", zhuin: "ㄏㄨㄚ" },
               { id: "5-10", chinese: "了", pinyin: "le", zhuin: "ㄌㄜ˙" },
               { id: "5-11", chinese: "綠色", pinyin: "lǜ sè", zhuin: "ㄌㄩˋ ㄙㄜˋ" },
-              { id: "5-12", chinese: "漂亮", pinyin: "piào ㄌㄧㄤˋ" },
+              { id: "5-12", chinese: "漂亮", pinyin: "piào liàng", zhuin: "ㄆㄧㄠˋ ㄌㄧㄤˋ" },
               { id: "5-13", chinese: "秋天", pinyin: "qiū tiān", zhuin: "ㄑㄧㄡ ㄊㄧㄢ" },
               { id: "5-14", chinese: "時候", pinyin: "shí hòu", zhuin: "ㄕˊ ㄏㄡˋ" },
               { id: "5-15", chinese: "樹葉", pinyin: "shù yè", zhuin: "ㄕㄨˋ ㄧㄝˋ" },
@@ -356,21 +480,65 @@
         // 綜合所有課程的資料
         const ALL_WORDS_FALLBACK = Object.values(DEFAULT_LESSON_DATA).flatMap(lesson => lesson.words);
 
-        // --- 遊戲參數 ---
-        const SPAWN_RATE = 2000;
-        const FALL_SPEED_BASE = 0.35;
+        // --- 遊戲參數設定 (難度組態) ---
+        const DIFFICULTY_SETTINGS = {
+            slow: { 
+                id: 'slow', 
+                label: '🐢 慢慢的', 
+                subLabel: '適合閱讀', 
+                bg: 'bg-green-500', 
+                speedBase: 0.15,    // 基礎掉落速度 (原 0.2)
+                spawnRate: 4000,   // 初始生成間隔 (原 3500)
+                minRate: 2500,      // 最快生成間隔限制 (原 2000)
+                character: '🐢',     // 進度條角色
+                startIcon: '🏁',
+                endIcon: '🥬'
+            },
+            normal: { 
+                id: 'normal', 
+                label: '🐇 普通速度', 
+                subLabel: '有點刺激', 
+                bg: 'bg-blue-500', 
+                speedBase: 0.25,   // (原 0.35)
+                spawnRate: 2500,   // (原 2000)
+                minRate: 1500,      // (原 1200)
+                character: '🐇',     // 進度條角色
+                startIcon: '🌲',
+                endIcon: '🥕'
+            },
+            fast: { 
+                id: 'fast', 
+                label: '🐆 快快的', 
+                subLabel: '超級挑戰', 
+                bg: 'bg-red-500', 
+                speedBase: 0.4,    // 大幅調慢 (原 0.6)
+                spawnRate: 1600,   // (原 1200)
+                minRate: 900,       // (原 600)
+                character: '🚀',     // 進度條角色
+                startIcon: '🌍',
+                endIcon: '🌕'
+            }
+        };
+
         const GAME_WIDTH_PCT = 85;
 
         function ChineseFallingGame() {
           const [gameState, setGameState] = useState('menu');
           const [selectedLessonId, setSelectedLessonId] = useState(null); 
+          // 新增：難度選擇狀態，預設為「慢慢的」
+          const [currentDifficulty, setCurrentDifficulty] = useState('slow'); 
+          // 新增：背景生詞狀態
+          const [bgWords, setBgWords] = useState([]);
+          // 新增：受傷紅屏狀態
+          const [damageFlash, setDamageFlash] = useState(false);
+
           const [customData, setCustomData] = useState([]); 
           const [customInputText, setCustomInputText] = useState(
             "早安, zǎo ān, ㄗㄠˇ ㄢ\n學校, xué xiào, ㄒㄩㄝˊ ㄒㄧㄠˋ\n朋友, péng yǒu, ㄆㄥˊ ㄧㄡˇ"
           );
           
           const [score, setScore] = useState(0);
-          const [lives, setLives] = useState(5);
+          const [lives, setLives] = useState(3); // 修改：初始生命值改為 3
           const [options, setOptions] = useState([]); 
           const [targetWordId, setTargetWordId] = useState(null);
           // Remove state based fallingWords for logic, use only for rendering
@@ -409,7 +577,9 @@
             wrongWordIds: new Set(),
             currentStage: 0,
             stageGoals: [],
-            combo: 0
+            combo: 0,
+            // 新增：將當前難度設定存入 Ref，供遊戲迴圈讀取
+            settings: DIFFICULTY_SETTINGS.slow 
           });
 
           // Check URL params on mount
@@ -422,6 +592,12 @@
                 setGameState('singleLessonIntro');
             }
           }, []);
+
+          // 觸發受傷效果
+          const triggerDamage = () => {
+              setDamageFlash(true);
+              setTimeout(() => setDamageFlash(false), 300);
+          };
 
           const parseCustomInput = (text) => {
             const lines = text.split('\n');
@@ -472,50 +648,6 @@
             }
           };
 
-          const playSound = (type) => {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-
-            const ctx = new AudioContext();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-
-            if (type === 'error') {
-              osc.type = 'sawtooth';
-              osc.frequency.setValueAtTime(150, ctx.currentTime);
-              osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.1);
-              gain.gain.setValueAtTime(0.5, ctx.currentTime);
-              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-              osc.start();
-              osc.stop(ctx.currentTime + 0.3);
-            } else if (type === 'correct') {
-              osc.type = 'sine';
-              osc.frequency.setValueAtTime(600, ctx.currentTime);
-              osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.1);
-              gain.gain.setValueAtTime(0.3, ctx.currentTime);
-              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
-              osc.start();
-              osc.stop(ctx.currentTime + 0.2);
-            } else if (type === 'victory') {
-                const now = ctx.currentTime;
-                [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    osc.type = 'triangle';
-                    osc.frequency.setValueAtTime(freq, now + i * 0.15);
-                    gain.gain.setValueAtTime(0.2, now + i * 0.15);
-                    gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.8);
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start(now + i * 0.15);
-                    osc.stop(now + i * 0.15 + 0.8);
-                });
-            }
-          };
-
           const generateOptions = useCallback((correctWord) => {
             if (!correctWord) return [];
             
@@ -539,7 +671,7 @@
 
           // Updated spawnWord to only update Ref, avoiding conflict with gameLoop render
           const spawnWord = useCallback(() => {
-            const { currentLessonWords, masteredWords, fallingWords, currentStage, score } = stateRef.current;
+            const { currentLessonWords, masteredWords, fallingWords, currentStage, score, settings } = stateRef.current;
 
             const candidates = currentLessonWords.filter(w => 
               !masteredWords.has(w.id) && 
@@ -559,7 +691,11 @@
             const speedLevel = Math.floor(currentStage / 3);
             const stageMultiplier = 1 + (speedLevel * 0.1); 
             
-            const finalSpeed = Math.min(1.5, FALL_SPEED_BASE * stageMultiplier);
+            // 修改：使用 settings 中的 speedBase
+            const finalSpeed = Math.min(settings.speedBase * 2.5, settings.speedBase * stageMultiplier);
+
+            // 5% 機率出現黃金獎勵字 (Bonus)
+            const isBonus = Math.random() < 0.05;
 
             const newWord = {
               id: Date.now() + Math.random(),
@@ -569,7 +705,8 @@
               zhuin: randomItem.zhuin,
               x: randomX,
               y: -15,
-              speed: finalSpeed
+              speed: finalSpeed,
+              isBonus: isBonus // 標記是否為獎勵字
             };
 
             // Only push to Ref, let loop handle the state update
@@ -604,12 +741,14 @@
             
             stateRef.current.lastTime = time;
 
-            const { currentStage, score, fallingWords: currentFallingWords } = stateRef.current;
+            const { currentStage, score, fallingWords: currentFallingWords, settings } = stateRef.current;
             
             // Slower spawn rate increase
             const speedLevel = Math.floor(currentStage / 3);
             const stageRateMod = speedLevel * 100; // Reduce 100ms every 3 stages
-            let currentRate = Math.max(1200, SPAWN_RATE - (score * 1) - stageRateMod); // Min 1.2s
+            
+            // 修改：使用 settings 中的 spawnRate 和 minRate
+            let currentRate = Math.max(settings.minRate, settings.spawnRate - (score * 2) - stageRateMod);
             
             if (currentFallingWords.length === 0) {
               currentRate = 500;
@@ -659,6 +798,8 @@
             setFallingWords(nextWords);
 
             if (livesLostCount > 0) {
+              triggerDamage();
+              playSound('error');
               setBottomWarn(true);
               setTimeout(() => setBottomWarn(false), 300);
 
@@ -697,9 +838,28 @@
             
             if (targetWord && (option.wordId === targetWord.wordId || option.chinese === targetWord.chinese)) {
               // CORRECT
-              playSound('correct');
+              
+              // 檢查是否為 Bonus 字
+              if (targetWord.isBonus) {
+                  playSound('heal');
+                  setLives(prev => Math.min(3, prev + 1)); // 最多補到 3 滴血
+              } else {
+                  playSound('correct');
+              }
+
               setHitEffect({ x: targetWord.x, y: targetWord.y });
               setTimeout(() => setHitEffect(null), 500);
+
+              // Add word to background wall (limit to last 20)
+              const newBgWord = {
+                  id: targetWord.id + '-bg', // Unique ID
+                  text: targetWord.chinese,
+                  x: Math.random() * 80 + 10, // 10% to 90%
+                  y: Math.random() * 60 + 10, // 10% to 70% (keep it somewhat upper/mid)
+                  rotation: Math.random() * 60 - 30, // -30 to 30 deg
+                  fontSize: Math.random() * 2 + 2 + 'rem' // Random size
+              };
+              setBgWords(prev => [...prev, newBgWord].slice(-20)); // Limit to last 20
 
               const nextWords = stateRef.current.fallingWords.filter(w => w.id !== targetWordId);
               stateRef.current.fallingWords = nextWords;
@@ -728,12 +888,24 @@
 
             } else {
               // WRONG
+              triggerDamage(); // 觸發紅屏
               playSound('error');
               stateRef.current.combo = 0;
               setCombo(0);
               
               stateRef.current.wrongWordIds.add(targetWord.wordId);
               
+              // 新增：答錯扣除生命值邏輯
+              setLives(prev => {
+                const newLives = prev - 1;
+                if (newLives <= 0) {
+                  stateRef.current.isPlaying = false;
+                  setGameState('gameover');
+                  return 0;
+                }
+                return newLives;
+              });
+
               const container = containerRef.current;
               if (container) {
                 container.classList.add('animate-shake');
@@ -803,7 +975,7 @@
             }
 
             setScore(0);
-            setLives(5);
+            setLives(3); // 修改：重置生命值改為 3
             setCombo(0);
             setFallingWords([]);
             setTargetWordId(null);
@@ -811,6 +983,10 @@
             setCurrentStageDisplay(0);
             setMasteredCountDisplay(0);
             setStageGoalDisplay(goals[0]);
+            setBgWords([]); // Reset background words
+
+            // 確保從 Pause 重啟時也使用當前的難度設定 (雖然通常不會變，但保持一致)
+            const currentSettings = stateRef.current.settings || DIFFICULTY_SETTINGS[currentDifficulty];
 
             stateRef.current = {
               fallingWords: [],
@@ -824,7 +1000,8 @@
               wrongWordIds: new Set(),
               currentStage: 0,
               stageGoals: goals,
-              combo: 0
+              combo: 0,
+              settings: currentSettings
             };
 
             startCountdown();
@@ -908,13 +1085,15 @@
             return () => window.removeEventListener('keydown', handleKeyDown);
           }, [handleKeyDown]);
 
-          // New function to handle opening the reward
+            // New function to handle opening the reward
           const handleOpenReward = () => {
             setIsRewardOpened(true);
             playSound('victory');
           };
 
-          const startGame = (type, idOrData, fromState = undefined) => {
+          // 修改：增加 difficultyOverride 參數，允許直接指定難度開始遊戲
+          const startGame = (type, idOrData, fromState = undefined, difficultyOverride = null) => {
+            initAudio(); // 啟動音效
             if (requestRef.current) {
               cancelAnimationFrame(requestRef.current);
             }
@@ -922,6 +1101,13 @@
             // Update prevGameState if fromState is provided (not retry)
             if (fromState) {
                 setPrevGameState(fromState);
+            }
+
+            // 處理難度設定
+            const targetDifficulty = difficultyOverride || currentDifficulty;
+            // 如果有指定難度，同步更新 React 狀態，這樣回到主選單時也會選中該難度
+            if (difficultyOverride) {
+                setCurrentDifficulty(difficultyOverride);
             }
 
             let wordsPool = [];
@@ -973,7 +1159,7 @@
             }
 
             setScore(0);
-            setLives(5);
+            setLives(3); // 修改：開始遊戲時生命值改為 3
             setCombo(0);
             setFallingWords([]);
             setTargetWordId(null);
@@ -981,6 +1167,7 @@
             setCurrentStageDisplay(0);
             setMasteredCountDisplay(0);
             setStageGoalDisplay(goals[0]);
+            setBgWords([]); // Reset background words
 
             stateRef.current = {
               fallingWords: [],
@@ -994,7 +1181,9 @@
               wrongWordIds: new Set(),
               currentStage: 0,
               stageGoals: goals,
-              combo: 0
+              combo: 0,
+              // 使用目標難度設定
+              settings: DIFFICULTY_SETTINGS[targetDifficulty] 
             };
 
             startCountdown();
@@ -1008,6 +1197,13 @@
             setCustomData(wrongWords);
             
             startGame('custom', wrongWords);
+          };
+          
+          // Helper: 取得下一個難度等級的 ID (用於勝利畫面)
+          const getNextDifficulty = () => {
+              if (currentDifficulty === 'slow') return 'normal';
+              if (currentDifficulty === 'normal') return 'fast';
+              return null;
           };
           
           const handleCopyLink = (lessonId) => {
@@ -1050,10 +1246,31 @@
           return (
             <div ref={containerRef} id="game-container" className="h-[100dvh] w-full bg-sky-900 text-white font-sans overflow-hidden relative selection:bg-none flex flex-col">
               
+              {/* Damage Flash Overlay */}
+              {damageFlash && (
+                  <div className="absolute inset-0 bg-red-500/30 z-[60] pointer-events-none animate-damage"></div>
+              )}
+
               <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute top-20 left-10 text-sky-800/50 text-9xl font-serif select-none">華</div>
                 <div className="absolute bottom-40 right-10 text-sky-800/50 text-9xl font-serif select-none">語</div>
                 <div className="absolute top-32 right-32 w-20 h-8 bg-white/10 rounded-full blur-xl"></div>
+                
+                {/* Background Words Layer */}
+                {bgWords.map(word => (
+                    <div
+                        key={word.id}
+                        className="absolute font-serif font-bold text-sky-200/20 select-none animate-pop-in"
+                        style={{
+                            left: `${word.x}%`,
+                            top: `${word.y}%`,
+                            '--rot': `${word.rotation}deg`, // 使用 CSS 變數傳遞旋轉角度
+                            fontSize: word.fontSize
+                        }}
+                    >
+                        {word.text}
+                    </div>
+                ))}
               </div>
               
               {/* Toast Notification */}
@@ -1131,16 +1348,40 @@
                         />
                       </div>
 
-                      <button type="button" onClick={() => setGameState('levelSelect')} className="w-full bg-sky-500 hover:bg-sky-600 text-white text-xl py-4 rounded-xl font-bold shadow-lg mb-3 flex items-center justify-center gap-2 transition-transform active:scale-95">
-                          <Play fill="currentColor" /> 開始闖關
-                      </button>
-                      
-                      <button type="button" onClick={() => setGameState('customEditor')} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white text-lg py-3 rounded-xl font-bold shadow-lg mb-3 flex items-center justify-center gap-2 transition-transform active:scale-95">
-                          <Edit3 size={20} /> 自訂題庫
-                      </button>
+                      {/* 難度選擇區塊 (移至這裡) */}
+                      <div className="bg-sky-50/50 p-3 rounded-xl mb-4 w-full border border-sky-100">
+                          <h3 className="text-sky-400 text-xs font-bold mb-2 flex items-center justify-center gap-1">
+                              <Target size={14} />
+                              選擇挑戰速度
+                          </h3>
+                          <div className="grid grid-cols-3 gap-2">
+                              {Object.values(DIFFICULTY_SETTINGS).map((setting) => (
+                                  <button
+                                      key={setting.id}
+                                      onClick={() => { setCurrentDifficulty(setting.id); initAudio(); }}
+                                      className={`
+                                          relative p-1.5 rounded-lg border transition-all flex flex-col items-center justify-center h-16
+                                          ${currentDifficulty === setting.id 
+                                              ? `${setting.bg} border-transparent text-white shadow-md scale-105 z-10` 
+                                              : 'bg-white border-sky-200 text-sky-400 hover:bg-sky-50'
+                                          }
+                                      `}
+                                  >
+                                      <span className="text-sm font-bold leading-tight">{setting.label.split(' ')[0]}</span>
+                                      <span className="text-[10px] font-bold whitespace-nowrap">{setting.label.split(' ')[1]}</span>
+                                      
+                                      {currentDifficulty === setting.id && (
+                                          <div className="absolute -top-1.5 -right-1.5 bg-white text-sky-900 rounded-full p-0.5 shadow-sm border border-sky-100">
+                                              <CheckCircle size={10} />
+                                          </div>
+                                      )}
+                                  </button>
+                              ))}
+                          </div>
+                      </div>
 
-                      <button type="button" onClick={() => startGame('preset', 'all', 'menu')} className="w-full bg-amber-500 hover:bg-amber-600 text-white text-lg py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95">
-                          <Grid size={20} /> 綜合複習
+                      <button type="button" onClick={() => { setGameState('levelSelect'); initAudio(); }} className="w-full bg-sky-500 hover:bg-sky-600 text-white text-xl py-4 rounded-xl font-bold shadow-lg mb-3 flex items-center justify-center gap-2 transition-transform active:scale-95">
+                          <Play fill="currentColor" /> 開始闖關
                       </button>
 
                       <div className="mt-6 text-xs text-sky-300 font-medium">
@@ -1199,8 +1440,8 @@
               {gameState === 'customEditor' && (
                 <div className="absolute inset-0 flex flex-col z-50 bg-sky-900 overflow-y-auto">
                   <div className="p-4 max-w-lg mx-auto w-full h-full flex flex-col">
-                    <button onClick={() => setGameState('menu')} className="flex items-center gap-1 text-sky-300 mb-4 hover:text-white shrink-0">
-                      <ArrowLeft size={20} /> 返回主選單
+                    <button onClick={() => setGameState('levelSelect')} className="flex items-center gap-1 text-sky-300 mb-4 hover:text-white shrink-0">
+                      <ArrowLeft size={20} /> 返回課程選擇
                     </button>
                     <h2 className="text-2xl font-bold text-white mb-2 text-center">自訂生詞表</h2>
                     <div className="bg-sky-800/50 p-3 rounded-lg text-sm text-sky-200 mb-4 flex gap-2">
@@ -1238,12 +1479,17 @@
               {gameState === 'levelSelect' && (
                 <div className="absolute inset-0 flex flex-col z-50 bg-sky-900 overflow-y-auto">
                   <div className="p-4 max-w-lg mx-auto w-full">
-                    <button onClick={() => setGameState('menu')} className="flex items-center gap-1 text-sky-300 mb-4 hover:text-white">
-                      <ArrowLeft size={20} /> 返回主選單
+                    {/* 修正：將返回按鈕改成更明顯的樣式 */}
+                    <button 
+                        onClick={() => setGameState('menu')} 
+                        className="w-full bg-white hover:bg-gray-100 text-sky-600 border-2 border-sky-200 text-lg py-3 rounded-xl font-bold flex items-center justify-center gap-2 mb-6 shadow-md"
+                    >
+                      <ArrowLeft size={20} /> 返回主選單 (換人/換難度)
                     </button>
+                    
                     <h2 className="text-2xl font-bold text-white mb-6 text-center">選擇課程</h2>
                     
-                    <div className="grid grid-cols-2 gap-4 pb-8">
+                    <div className="grid grid-cols-2 gap-4 pb-4">
                       {Object.entries(DEFAULT_LESSON_DATA).map(([id, data]) => (
                         <div key={id} className="relative group">
                             <button 
@@ -1267,6 +1513,23 @@
                         </div>
                       ))}
                     </div>
+
+                    <div className="flex flex-col gap-3 pb-8">
+                        <div className="flex items-center gap-2 text-sky-400 text-sm font-bold my-2">
+                            <div className="h-px bg-sky-600 flex-1"></div>
+                            <span>特殊模式</span>
+                            <div className="h-px bg-sky-600 flex-1"></div>
+                        </div>
+
+                        <button type="button" onClick={() => setGameState('customEditor')} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white text-lg py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95">
+                            <Edit3 size={20} /> 自訂題庫
+                        </button>
+
+                        <button type="button" onClick={() => startGame('preset', 'all', 'levelSelect')} className="w-full bg-amber-500 hover:bg-amber-600 text-white text-lg py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95">
+                            <Grid size={20} /> 綜合複習
+                        </button>
+                    </div>
+
                   </div>
                 </div>
               )}
@@ -1283,55 +1546,54 @@
               {/* Playing / Paused HUD & Game Area */}
               {(gameState === 'playing' || gameState === 'paused') && (
                 <>
-                  <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-start z-10 max-w-xl mx-auto w-full">
-                    <div className="flex items-start gap-2">
+                  <div className="absolute top-0 left-0 right-0 p-2 md:p-4 flex justify-between items-start z-10 max-w-3xl mx-auto w-full">
+                    <div className="flex items-start gap-2 md:gap-4">
                       <button 
                         onClick={togglePause}
-                        className="mt-0.5 p-1.5 bg-black/20 hover:bg-black/40 rounded-lg text-white/90 hover:text-white transition-colors backdrop-blur-sm"
+                        className="mt-2 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white/90 hover:text-white transition-colors backdrop-blur-sm border border-white/10 shadow-sm"
                         title="暫停"
                       >
-                        {gameState === 'paused' ? <Play size={20} fill="currentColor"/> : <Pause size={20} fill="currentColor" />}
+                        {gameState === 'paused' ? <Play size={24} fill="currentColor"/> : <Pause size={24} fill="currentColor" />}
                       </button>
+                      
                       <div className="flex flex-col">
-                        <h1 className="text-xl font-bold text-sky-200 flex items-center gap-2 truncate max-w-[180px]">
-                          {stateRef.current.title}
-                        </h1>
-                        
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs bg-yellow-500/80 px-2 py-0.5 rounded text-white font-bold">
-                            關卡 {currentStageDisplay + 1}/{stateRef.current.stageGoals.length}
-                          </span>
-                          <div className="flex items-center text-xs text-sky-300">
-                            <CheckCircle size={12} className="mr-1" />
-                            {masteredCountDisplay} / {stateRef.current.currentLessonWords.length}
-                          </div>
+                        {/* 標題與關卡資訊 */}
+                        <div className="flex flex-col md:flex-row md:items-end gap-1 md:gap-3">
+                            <h1 className="text-lg md:text-xl font-bold text-sky-100 truncate max-w-[140px] md:max-w-[250px] drop-shadow-sm">
+                              {stateRef.current.title}
+                            </h1>
+                            <span className="text-xs bg-yellow-500/90 px-2 py-0.5 rounded text-white font-bold shadow-sm self-start md:self-auto md:mb-1">
+                                關卡 {currentStageDisplay + 1}/{stateRef.current.stageGoals.length}
+                            </span>
                         </div>
 
-                        <div className="w-32 h-1.5 bg-sky-900/50 rounded-full mt-1 border border-sky-600/50 overflow-hidden">
-                          <div 
-                            className="h-full bg-green-400 transition-all duration-500"
-                            style={{ width: `${Math.min(100, (masteredCountDisplay / stageGoalDisplay) * 100)}%` }}
-                          ></div>
-                        </div>
+                        {/* 使用新的劇情進度條 */}
+                        <StoryProgressBar 
+                            current={masteredCountDisplay} 
+                            total={stageGoalDisplay} 
+                            character={stateRef.current.settings?.character || '🐇'}
+                            startIcon={stateRef.current.settings?.startIcon || '🏁'} 
+                            endIcon={stateRef.current.settings?.endIcon || '🥕'} 
+                        />
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-2">
-                        <div className="text-right">
-                            <p className="text-xs text-sky-400">SCORE</p>
-                            <p className="text-2xl font-mono font-bold text-white">{score}</p>
+                    <div className="flex flex-col items-end gap-1 md:gap-2">
+                        <div className="text-right bg-black/20 p-2 rounded-xl backdrop-blur-sm border border-white/5">
+                            <p className="text-[10px] text-sky-300 font-bold tracking-wider">SCORE</p>
+                            <p className="text-2xl md:text-3xl font-mono font-bold text-white leading-none">{score}</p>
                         </div>
                         {combo > 1 && (
-                          <div className="text-yellow-400 font-bold text-xl animate-pulse">
-                            {combo} COMBO!
+                          <div className="text-yellow-400 font-bold text-lg md:text-xl animate-bounce drop-shadow-md">
+                            🔥 {combo} COMBO!
                           </div>
                         )}
-                        <div className="flex gap-0.5">
-                            {[...Array(5)].map((_, i) => (
+                        <div className="flex gap-1 mt-1 bg-black/20 px-2 py-1 rounded-full backdrop-blur-sm">
+                            {[...Array(3)].map((_, i) => ( 
                             <Heart 
                                 key={i} 
-                                size={18} 
-                                className={`${i < lives ? 'fill-red-500 text-red-500' : 'text-sky-800'} transition-all`} 
+                                size={20} 
+                                className={`${i < lives ? 'fill-red-500 text-red-500 drop-shadow-sm' : 'text-sky-900/50'} transition-all`} 
                             />
                             ))}
                         </div>
@@ -1353,8 +1615,11 @@
                             >
                                 <div className={`
                                     relative flex flex-col items-center justify-center
-                                    bg-white text-sky-900 rounded-xl shadow-lg border-4 
-                                    ${isTarget ? 'border-yellow-400 scale-110 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : 'border-sky-200 opacity-100'}
+                                    ${word.isBonus 
+                                        ? 'bg-yellow-100 text-yellow-900 border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.6)]' 
+                                        : 'bg-white text-sky-900 border-sky-200'}
+                                    rounded-xl shadow-lg border-4 
+                                    ${isTarget ? 'border-yellow-400 scale-110 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : 'opacity-100'}
                                     px-4 py-3 min-w-[100px]
                                 `}>
                                     {isTarget && (
@@ -1362,7 +1627,12 @@
                                             <Target size={24} />
                                         </div>
                                     )}
-                                    <span className="text-3xl md:text-4xl font-bold font-serif text-slate-900 whitespace-nowrap">{word.chinese}</span>
+                                    {word.isBonus && (
+                                        <div className="absolute -top-3 -right-3 text-red-500 bg-white rounded-full p-0.5 shadow-sm border border-red-100">
+                                            <Heart size={16} fill="currentColor" />
+                                        </div>
+                                    )}
+                                    <span className="text-3xl md:text-4xl font-bold font-serif whitespace-nowrap">{word.chinese}</span>
                                 </div>
                             </div>
                         );
@@ -1420,23 +1690,23 @@
                       </div>
                       <h2 className="text-3xl font-bold mb-2 text-sky-800">關卡 {currentStageDisplay + 1} 完成！</h2>
                       <p className="text-sky-600 mb-6">
-                         已精熟 {masteredCountDisplay} 個單字。<br/>
-                         
-                         {/* Motivational Messages based on stage */}
-                         {(currentStageDisplay + 1) % 3 === 0 ? (
+                          已精熟 {masteredCountDisplay} 個單字。<br/>
+                          
+                          {/* Motivational Messages based on stage */}
+                          {(currentStageDisplay + 1) % 3 === 0 ? (
                             <span className="text-amber-600 font-bold mt-2 block text-lg animate-pulse">
                                 {currentStageDisplay + 1 === 3 && "太棒了！已經通過三關了！"}
                                 {currentStageDisplay + 1 === 6 && "不可思議！你的專注力真強！"}
                                 {currentStageDisplay + 1 === 9 && "堅持住！勝利就在眼前！"}
                                 {currentStageDisplay + 1 > 9 && "你是華語特訓大師！"}
                             </span>
-                         ) : (
+                          ) : (
                             <span className="text-slate-400 font-bold mt-2 block">
                                 {(currentStageDisplay + 1) % 3 === 2 
                                     ? "下一關速度將會稍微提升！" 
                                     : "保持節奏，繼續前進！"}
                             </span>
-                         )}
+                          )}
                       </p>
                       
                       <button type="button" onClick={nextStage} className="w-full bg-green-500 hover:bg-green-600 text-white text-lg py-3 rounded-xl font-bold shadow-md flex items-center justify-center gap-2">
@@ -1449,7 +1719,7 @@
               {/* Victory / Gameover Screen */}
               {(gameState === 'gameover' || gameState === 'victory') && (
                 <div className="absolute inset-0 flex items-center justify-center z-50 bg-sky-950/90 backdrop-blur-sm p-4 overflow-y-auto">
-                     <div className="bg-white text-sky-900 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center border-4 border-sky-200 animate-fade-in-up my-auto">
+                      <div className="bg-white text-sky-900 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center border-4 border-sky-200 animate-fade-in-up my-auto">
                         {gameState === 'victory' && !isRewardOpened ? (
                             // 禮物盒狀態
                            <>
@@ -1516,7 +1786,7 @@
                                             </div>
                                             <Volume2 size={14} className="text-slate-300 ml-2" />
                                           </div>
-                                        ))
+                                      ))
                                       }
                                     </div>
                                     <button 
@@ -1539,17 +1809,52 @@
                                 )}
 
                                 <div className="flex flex-col gap-2">
+                                  
+                                  {/* 新增：挑戰下一級按鈕 (僅在勝利且有下一級時顯示) */}
+                                  {gameState === 'victory' && getNextDifficulty() && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => startGame(
+                                            selectedLessonId === 'custom' ? 'custom' : 'preset', 
+                                            selectedLessonId === 'custom' ? customData : selectedLessonId,
+                                            undefined,
+                                            getNextDifficulty() // 傳入下一個難度
+                                        )} 
+                                        className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-lg py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 animate-pulse"
+                                      >
+                                        <span className="text-xl">🔥</span> 
+                                        挑戰{DIFFICULTY_SETTINGS[getNextDifficulty()].label}
+                                      </button>
+                                  )}
+
+                                  {/* 最高難度通關鼓勵 */}
+                                  {gameState === 'victory' && !getNextDifficulty() && (
+                                      <div className="text-amber-400 font-bold text-sm mb-1 animate-bounce">
+                                          👑 你已經是最高等級大師了！
+                                      </div>
+                                  )}
+
                                   <button 
                                     type="button"
                                     onClick={() => startGame(selectedLessonId === 'custom' ? 'custom' : 'preset', selectedLessonId === 'custom' ? customData : selectedLessonId)} 
                                     className="w-full bg-sky-500 hover:bg-sky-600 text-white text-lg py-3 rounded-xl font-bold shadow-md flex items-center justify-center gap-2"
                                   >
-                                      <RotateCcw size={18} /> 再次挑戰
+                                    <RotateCcw size={18} /> 再次挑戰 (同難度)
                                   </button>
-                                  <button type="button" onClick={() => setGameState(prevGameState)} className="w-full bg-white hover:bg-sky-50 border-2 border-sky-200 text-sky-700 text-lg py-3 rounded-xl font-bold flex items-center justify-center gap-2">
-                                      {prevGameState === 'menu' ? <Home size={18} /> : <ArrowLeft size={18} />}
-                                      {prevGameState === 'menu' ? '回主選單' : '返回上一頁'}
-                                  </button>
+                                  
+                                  <div className="flex gap-2">
+                                      <button type="button" onClick={() => setGameState(prevGameState)} className="flex-1 bg-white hover:bg-sky-50 border-2 border-sky-200 text-sky-700 text-lg py-3 rounded-xl font-bold flex items-center justify-center gap-2">
+                                        {prevGameState === 'menu' ? <Home size={18} /> : <ArrowLeft size={18} />}
+                                        {prevGameState === 'menu' ? '回主選單' : '返回上一頁'}
+                                      </button>
+                                      
+                                      {/* 新增：如果上一頁不是主選單 (例如是選課頁)，多給一個直接回主選單的按鈕 */}
+                                      {prevGameState !== 'menu' && (
+                                          <button type="button" onClick={() => setGameState('menu')} className="bg-sky-800 hover:bg-sky-700 border-2 border-sky-600 text-sky-200 py-3 px-4 rounded-xl font-bold flex items-center justify-center" title="回主選單">
+                                            <Home size={18} />
+                                          </button>
+                                      )}
+                                  </div>
                                 </div>
                            </>
                         )}
